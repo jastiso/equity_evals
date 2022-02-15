@@ -1,0 +1,1627 @@
+---
+title: "PSOM Student Evaluations"
+author: "Jennifer Stiso"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+    highlight: tango
+    theme: united
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(ggplot2, RColorBrewer, tidyverse, stringr, lm.beta, GGally, glmnet, reshape2, shiny, rjson, lmPerm, lmerTest, gridExtra)
+
+# set u split violin
+GeomSplitViolin <- ggproto("GeomSplitViolin", GeomViolin, 
+                           draw_group = function(self, data, ..., draw_quantiles = NULL) {
+  data <- transform(data, xminv = x - violinwidth * (x - xmin), xmaxv = x + violinwidth * (xmax - x))
+  grp <- data[1, "group"]
+  newdata <- plyr::arrange(transform(data, x = if (grp %% 2 == 1) xminv else xmaxv), if (grp %% 2 == 1) y else -y)
+  newdata <- rbind(newdata[1, ], newdata, newdata[nrow(newdata), ], newdata[1, ])
+  newdata[c(1, nrow(newdata) - 1, nrow(newdata)), "x"] <- round(newdata[1, "x"])
+
+  if (length(draw_quantiles) > 0 & !scales::zero_range(range(data$y))) {
+    stopifnot(all(draw_quantiles >= 0), all(draw_quantiles <=
+      1))
+    quantiles <- ggplot2:::create_quantile_segment_frame(data, draw_quantiles)
+    aesthetics <- data[rep(1, nrow(quantiles)), setdiff(names(data), c("x", "y")), drop = FALSE]
+    aesthetics$alpha <- rep(1, nrow(quantiles))
+    both <- cbind(quantiles, aesthetics)
+    quantile_grob <- GeomPath$draw_panel(both, ...)
+    ggplot2:::ggname("geom_split_violin", grid::grobTree(GeomPolygon$draw_panel(newdata, ...), quantile_grob))
+  }
+  else {
+    ggplot2:::ggname("geom_split_violin", GeomPolygon$draw_panel(newdata, ...))
+  }
+})
+
+geom_split_violin <- function(mapping = NULL, data = NULL, stat = "ydensity", position = "identity", ..., 
+                              draw_quantiles = NULL, trim = TRUE, scale = "area", na.rm = FALSE, 
+                              show.legend = NA, inherit.aes = TRUE) {
+  layer(data = data, mapping = mapping, stat = stat, geom = GeomSplitViolin, 
+        position = position, show.legend = show.legend, inherit.aes = inherit.aes, 
+        params = list(trim = trim, scale = scale, draw_quantiles = draw_quantiles, na.rm = na.rm, ...))
+}
+
+main <-  read.csv('../data/SOM Student Performance Evaluation Comments 2017-2020_AdditionalFields.csv', header=T)
+sub_i <-  read.csv('../data/SOM Student Performance Evaluation Comments 2017-2020_SubI.csv', header=T)
+
+# give sub_i the same questions names
+sub_i$Question <- plyr::mapvalues(sub_i$Question,
+    c("Please describe areas in which improvement is needed.", "Please describe the student's strengths.","Please describe areas in which improvement is needed",""),
+    c("Areas for improvement/Additional comments","Strengths/Summary","Areas for improvement/Additional comments","")
+  )
+
+# make unique id
+main <- main %>%
+  mutate(
+    uniqueid = paste(FormID, Question)
+  )
+sub_i <- sub_i %>%
+  mutate(
+    uniqueid = paste(FormID, Question)
+  )
+
+# merge
+df = rbind(main, sub_i)
+summary(df)
+
+# penn colors
+colors <- c(rgb(148/255,0/255,26/255), rgb(0/255,17/255,77/255))
+
+# do you want to spend API credits to get predictions?
+query = F
+# do you want to print examples?
+print_ex = F
+```
+
+
+# Descriptive Analysis of Self-Reported Race/Ethnicity {.tabset}
+
+Let's explore the proportions of different self reported ethnic groups in trainees.
+## URM
+```{r}
+
+df %>%
+  group_by(StudentID) %>%
+  summarise(S_URM = first(S_URM)) %>%
+  filter(S_URM != "") %>%
+  ggplot(aes(x=S_URM)) + geom_bar(fill=colors[2]) + theme_minimal()
+
+df %>%
+  group_by(StudentID) %>%
+  summarise(URM = first(S_URM)) %>%
+  filter(URM != "") %>%
+  count(URM) %>%
+  mutate(percent = n/sum(n)*100)
+```
+## Ethnicity
+```{r}
+
+df %>%
+  group_by(StudentID) %>%
+  summarise(S_SRS.Calc.Race.Desc = first(S_SRS.Calc.Race.Desc)) %>%
+  filter(S_SRS.Calc.Race.Desc != "") %>%
+  ggplot(aes(x=S_SRS.Calc.Race.Desc)) + geom_bar(fill=colors[2]) + theme_minimal()
+
+df %>%
+  group_by(StudentID) %>%
+  summarise(Ethnicity = first(S_SRS.Calc.Race.Desc)) %>%
+  filter(Ethnicity != "") %>%
+  count(Ethnicity) %>%
+  mutate(percent = n/sum(n)*100)
+```
+
+## URM by Discipline
+```{r}
+
+df %>%
+  group_by(StudentID) %>%
+  summarise(
+    S_URM = first(S_URM),
+    Cid = first(Cid)
+    ) %>%
+  filter(S_URM != "") %>%
+  ggplot(aes(x=Cid,fill=S_URM)) + geom_bar() + theme_minimal() + scale_fill_manual(values=rev(brewer.pal(2,'Blues')))
+
+```
+## Ethnicity by Discipline
+```{r}
+
+df %>%
+  group_by(StudentID) %>%
+  summarise(
+    S_SRS.Calc.Race.Desc = first(S_SRS.Calc.Race.Desc),
+    Cid = first(Cid)
+    ) %>%
+  filter(S_SRS.Calc.Race.Desc != "") %>%
+  ggplot(aes(x=Cid,fill=S_SRS.Calc.Race.Desc)) + geom_bar() + theme_minimal() + 
+  scale_fill_manual(values=rev(brewer.pal(6,'Blues')))
+
+```
+
+# Predicting Gender with First Name
+
+We need some estimate of gender for all the students in the data. One way to do this is by determining the likelihood that a name belongs to an individual of a certain gender based on 800,000 social media profiles from 177 countries. This probabilistic estimate is a better estimate of the perceived gender of an individual based only on their name, rather than the individual's true gender identity. Ideally, this method would be complimented with data from other forms of gender expression, including but not limited to self reported gender.
+```{r}
+# Enter your API key here for gender-api.com
+genderAPI_key <- '&key=upjwHvfxoCjaFvojwU'
+
+# get first names
+names <- data.frame(full = unique(df$StudentName)) 
+names$first <- sapply(names$full, function(x) {unlist(strsplit(x, ','))[2]})
+names <- add_column(names, prob.w = NA, prob.m = NA)
+ 
+if (query){
+   # For the remaining unqueried names...
+  for(i in seq(1,nrow(names))){
+    
+    if (is.na(names$prob.w[i]) || (names$prob.w[i] == -1)){
+      
+      # clean name
+      this_name = str_trim(names$first[i])
+      if (length(unlist(str_split(this_name, ' '))) > 1){
+        this_name <- unlist(str_split(this_name, ' '))[1]
+        if (nchar(this_name) < 2){
+          this_name <- unlist(str_split(this_name, ' '))[2]
+        }
+      }
+      
+      # Pull json data from gender-api
+      json_file=paste0("https://gender-api.com/get?name=",this_name,
+                       "&key=",genderAPI_key)
+      json_data=fromJSON(file=json_file)
+      
+      # Save gender probabilities to the namegends dataset
+      # Enter -1 if gender-api doesn't have any data for that name
+      if(json_data$gender=="male"){
+        names$prob.m[i]=json_data$accuracy/100
+        names$prob.w[i]=1-json_data$accuracy/100
+      }else if(json_data$gender=="female"){
+        names$prob.w[i]=json_data$accuracy/100
+        names$prob.m[i]=1-json_data$accuracy/100
+      }else{
+        names$prob.w[i]=-1
+        names$prob.m[i]=-1
+      }
+      
+      # Output the name and associated gender probability (optional)
+      print(paste0(this_name,"=",json_data$gender,
+                   ": confidence=",json_data$accuracy))
+      
+      
+      # Pause to space out pull requests
+      time=round(runif(1,1,3),0)
+      for(t in time:1){
+        Sys.sleep(1)
+        cat("Countdown:",t,"\n")
+      }
+    } 
+  }
+  
+  write.csv(names, "../data/names.csv")
+} else {
+  names <- read.csv("../data/names.csv", header=T)
+  names <- select(names, -X)
+}
+```
+
+```{r}
+# merge name data with other data, and add fields
+names$gender50 = sapply(names$prob.w, function(x){
+  if (x < 0){
+    return(NA)
+    } else if(x <= .50){
+    return('M')
+    } else {
+      return('W')
+    }
+  })
+names$gender70 = sapply(names$prob.w, function(x){
+  if (x < 0){
+    return(NA)
+    } else if(x >= .70){
+    return('W')
+    } else if(x <= .30){
+    return('M')
+    } else {
+      return(NA)
+    }
+  })
+
+df <- merge(df, names, by.x='StudentName', by.y='full')
+df <- df[df$FormID != "",]
+```
+
+Repeat for faculty names
+```{r}
+# Enter your API key here for gender-api.com
+genderAPI_key <- '&key=upjwHvfxoCjaFvojwU'
+student_names <- read.csv('../data/names.csv')
+
+# get faculty first names
+names <- data.frame(full = unique(df$Evaluatee)) 
+names$first <- sapply(names$full, function(x) {unlist(strsplit(x, ','))[2]})
+names <- add_column(names, F_prob.w = NA, F_prob.m = NA)
+ 
+if (query){
+   # For the remaining unqueried names...
+  for(i in seq(1,nrow(names))){
+    
+    if (is.na(names$F_prob.w[i])){
+      # check if we found this name earlier
+      if (any(grepl(names$first[i], student_names$first))){
+        idx <- which(grepl(names$first[i], student_names$first))
+        names$prob.m[i]=student_names$F_prob.m[idx[1]]
+        names$prob.w[i]=student_names$F_prob.w[idx[1]]
+      }
+      
+      if (sum(grepl(names$first[i], names$first)) > 1){
+        idx <- which(grepl(names$first[i], names$first))
+        idx <- idx[idx < i]
+        if (length(idx) > 0){
+          names$prob.m[i]=student_names$F_prob.m[idx[1]]
+          names$prob.w[i]=student_names$F_prob.w[idx[1]]
+        }
+      }
+      
+      # clean name
+      this_name = str_trim(names$first[i])
+      if (length(unlist(str_split(this_name, ' '))) > 1){
+        this_name <- unlist(str_split(this_name, ' '))[1]
+        if (nchar(this_name) < 2){
+          this_name <- unlist(str_split(this_name, ' '))[2]
+        }
+      }
+
+      # Pull json data from gender-api
+      json_file=paste0("https://gender-api.com/get?name=",this_name,
+                       "&key=",genderAPI_key)
+      json_data=fromJSON(file=json_file)
+      
+      # Save gender probabilities to the namegends dataset
+      # Enter -1 if gender-api doesn't have any data for that name
+      if(json_data$gender=="male"){
+        names$F_prob.m[i]=json_data$accuracy/100
+        names$F_prob.w[i]=1-json_data$accuracy/100
+      }else if(json_data$gender=="female"){
+        names$F_prob.w[i]=json_data$accuracy/100
+        names$F_prob.m[i]=1-json_data$accuracy/100
+      }else{
+        names$F_prob.w[i]=-1
+        names$F_prob.m[i]=-1
+      }
+      
+      # Output the name and associated gender probability (optional)
+      print(paste0(this_name,"=",json_data$gender,
+                   ": confidence=",json_data$accuracy))
+      
+      
+      # Pause to space out pull requests
+      time=round(runif(1,1,3),0)
+      for(t in time:1){
+        Sys.sleep(1)
+        cat("Countdown:",t,"\n")
+      }
+    } 
+  }
+  
+  write.csv(names, "../data/F_names.csv")
+} else {
+  names <- read.csv("../data/F_names.csv", header=T)
+  names <- select(names, -X)
+}
+```
+
+```{r}
+# merge name data with other data, and add fields
+names$F_gender50 = sapply(names$F_prob.w, function(x){
+  if (x < 0){
+    return(NA)
+    } else if(x <= .50){
+    return('M')
+    } else {
+      return('W')
+    }
+  })
+names$F_gender70 = sapply(names$F_prob.w, function(x){
+  if (x < 0){
+    return(NA)
+    } else if(x >= .70){
+    return('W')
+    } else if(x <= .30){
+    return('M')
+    } else {
+      return(NA)
+    }
+  })
+
+df <- merge(df, names, by.x='Evaluatee', by.y='full')
+df <- df[df$FormID != "",]
+write_csv(df, '../data/psom_evals.csv')
+```
+
+# Descriptive Analysis of Predicted Gender {.tabset}
+
+This method returns a probability that a name is associated with a given gender, therefore you can set different 
+thresholds" to bin individuals as "women" and "men".
+## student classification at 50%
+```{r}
+
+df %>%
+  group_by(StudentID) %>%
+  summarise(Gender = first(gender50)) %>%
+  ggplot(aes(x=Gender)) + geom_bar(fill=colors[1]) + theme_minimal()
+
+df %>%
+  group_by(StudentID) %>%
+  summarise(Gender = first(gender50)) %>%
+  count(Gender) %>%
+  mutate(percent = n/sum(n)*100)
+```
+
+## faculty classification at 50%
+```{r}
+
+df %>%
+  group_by(Evaluatee) %>%
+  summarise(Gender = first(F_gender50)) %>%
+  ggplot(aes(x=Gender)) + geom_bar(fill=colors[1]) + theme_minimal()
+
+df %>%
+  group_by(Evaluatee) %>%
+  summarise(Gender = first(F_gender50)) %>%
+  count(Gender) %>%
+  mutate(percent = n/sum(n)*100)
+```
+
+## student classification by discipline (50%)
+```{r}
+
+df %>%
+  group_by(StudentID) %>%
+  summarise(
+    Gender = first(gender50),
+    Cid = first(Cid)
+    ) %>%
+  filter(!is.na(Gender)) %>%
+  ggplot(aes(x=Cid,fill=Gender)) + geom_bar() + theme_minimal() + scale_fill_manual(values=rev(brewer.pal(3,'Reds')))
+
+```
+
+## faculty classification by discipline (50%)
+```{r}
+
+df %>%
+  group_by(Instructor_ID) %>%
+  summarise(
+    Gender = first(F_gender50),
+    Cid = first(Cid)
+    ) %>%
+  filter(!is.na(Gender)) %>%
+  ggplot(aes(x=Cid,fill=Gender)) + geom_bar() + theme_minimal() + scale_fill_manual(values=rev(brewer.pal(3,'Reds')))
+
+```
+
+# Use of gender-coded language in reviews {.tabset}
+
+In separate code notebook, we calculated the mean and median semantic distance between all words in a review, and the words 'woman' and 'man'. This is done using an algorithm called 'word2vec', that represents word semantic definitions as vectors, determined from neural networks trained to predict subsequent words in sentences from Wikipedia, or biomedical research papers The semantic distances produced with this method have been demonstrated to recreate many intuitive semantic relationships that can be captures with analogies.
+```{r}
+df <- read.csv('../data/psom_evals_nlp.csv')
+df <- df %>% mutate(
+  med_diff_bio = med_wom_bio - med_man_bio,
+  med_diff_wiki = med_wom_wiki - med_man_wiki,
+  scale_sent = log10(sum_sent + (-1*min(df$sum_sent, na.rm=T)) + 1)
+  )
+# remove one word reviews - this cuts out things like "na", "xx", and empty reviews
+df <- filter(df, text_len > 1)
+
+# identify "see above" and "none" answers
+df <- df %>% mutate(
+  above_flag = unlist(sapply(df$Answer.Text_Detail, function(x){
+    words = strsplit(tolower(gsub('[[:punct:]]+',' ', x))," ")
+    n = length(words[[1]])
+    flag = any(grepl('above', words))
+    return(flag & n<5)
+  })),
+  none_flag = unlist(sapply(df$Answer.Text_Detail, function(x){
+    words = strsplit(tolower(gsub('[[:punct:]]+',' ', x))," ")
+    n = length(words[[1]])
+    flag1 = any(grepl('none', words))
+    flag2 = any(grepl('nothing', words))
+    return((flag1 | flag2) & n<5)
+  }))
+)
+```
+
+
+## fem - masc (med)
+```{r}
+
+df %>%
+  filter(Answer.Text_Detail != "") %>%
+  ggplot(aes(x=med_diff_bio)) + 
+  geom_histogram(fill=colors[1]) + 
+  theme_minimal() 
+
+```
+
+# Differences in Gender-Coded Language Use {.tabset}
+Now that we have our quantification of gender-coded language, we can look for differences based on the perceived gender of the name
+
+## Student Gender
+```{r}
+
+plot_df <- df %>%
+  filter(Answer.Text_Detail != "", prob.w > 0)
+
+ggplot(plot_df, aes(x=med_diff_bio, y=prob.w)) + 
+geom_smooth(method='lm', color=colors[1]) + 
+theme_minimal() 
+
+```
+
+## Discipline
+```{r}
+
+plot_df <- df %>%
+  filter(Answer.Text_Detail != "")
+
+ggplot(plot_df, aes(y=med_diff_bio, x=Cid)) + 
+geom_violin(fill=colors[1]) + geom_boxplot(width=0.1) +
+scale_fill_brewer('Blues') + theme_minimal() 
+
+```
+## question type
+```{r}
+
+plot_df <- df %>%
+  filter(Answer.Text_Detail != "") %>%
+  select(med_diff_bio,Question,StudentID) %>%
+  dcast(formula=StudentID~Question, fun.aggregate = sum, value.var = 'med_diff_bio') %>%
+  rename(
+    Improvement = 'Areas for improvement/Additional comments',
+    Strengths = 'Strengths/Summary'
+  )
+
+ggplot(plot_df, aes(x=Improvement,y=Strengths)) + 
+  geom_point() + geom_smooth(method='lm') +
+  theme_minimal() 
+
+stat <- cor.test(plot_df$Improvement, plot_df$Strengths)
+stat
+```
+## model type
+```{r}
+
+ggplot(df, aes(x=med_diff_bio,y=med_diff_wiki)) + 
+  geom_point() + geom_smooth(method='lm') +
+  theme_minimal() 
+
+stat <- cor.test(df$med_diff_bio, df$med_diff_wiki)
+stat
+```
+
+# Linear Model {.tabset}
+Statistically, we can test for these differences using a linear model
+
+## Areas for improvement - feminine language
+```{r}
+
+fit_df <- df %>%
+  filter(
+    Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    gender50 != "",
+    above_flag == 0,
+    prob.w > 0) 
+fit_df$Instructor_ID <- as.factor(fit_df$Instructor_ID)
+fit_df$StudentID <- as.factor(fit_df$StudentID)
+fit_df$Cid <- as.factor(fit_df$Cid)
+# scale
+fit_df$prob.w <- scale(fit_df$prob.w)
+contrasts(fit_df$Cid) <- contr.helmert(8)/8
+contrasts(fit_df$StudentID) <- contr.helmert(length(levels(fit_df$StudentID)))/length(levels(fit_df$StudentID))
+# model
+fit = lmer(data=fit_df, med_wom_wiki ~ prob.w*Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+# order for plotting
+fem_ord = levels(fit_df$Cid)[order(c(fit@beta[3:(3+length(levels(fit_df$Cid))-1)], 0))]
+
+res <- resid(fit)
+{qqnorm(res)
+qqline(res)}
+# check outliers
+cooksd <- cooks.distance(fit)
+plot(cooksd, pch="*", cex=2, main="Influential Obs by Cooks distance")
+abline(h = 4*mean(cooksd, na.rm=T), col="red")  # add cutoff line
+text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4*mean(cooksd, na.rm=T),names(cooksd),""), col="red")  # add labels
+# redo model without outliers
+fit_df_no <- fit_df[cooksd>4*mean(cooksd, na.rm=T),]
+fit_no <- lmer(data=fit_df_no, med_wom_wiki ~ prob.w*Cid + (1|Instructor_ID))
+anova(fit_no)
+
+```
+## Areas for improvement - masculine language
+```{r}
+
+fit_df <- df %>%
+  filter(
+    Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    gender50 != "",
+    above_flag == 0,
+    prob.w > 0) 
+fit_df$Instructor_ID <- as.factor(fit_df$Instructor_ID)
+fit_df$Cid <- as.factor(fit_df$Cid)
+# scale
+fit_df$prob.w <- scale(fit_df$prob.w)
+contrasts(fit_df$Cid) <- contr.helmert(8)/8
+# model
+fit = lmer(data=fit_df, med_man_wiki ~ prob.w*Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+# order for plotting
+masc_ord = levels(fit_df$Cid)[order(c(fit@beta[3:(3+length(levels(fit_df$Cid))-1)], 0))]
+
+res <- resid(fit)
+{qqnorm(res)
+qqline(res)}
+# check outliers
+cooksd <- cooks.distance(fit)
+plot(cooksd, pch="*", cex=2, main="Influential Obs by Cooks distance")
+abline(h = 4*mean(cooksd, na.rm=T), col="red")  # add cutoff line
+text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4*mean(cooksd, na.rm=T),names(cooksd),""), col="red")  # add labels
+# redo model without outliers
+fit_df_no <- fit_df[cooksd>4*mean(cooksd, na.rm=T),]
+fit_no <- lmer(data=fit_df_no, med_man_wiki ~ prob.w*Cid + (1|Instructor_ID))
+anova(fit_no)
+
+```
+
+## Areas for improvement - difference 
+```{r}
+
+fit_df <- df %>%
+  filter(
+    Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    gender50 != "",
+    above_flag == 0,
+    prob.w > 0) 
+fit_df$Instructor_ID <- as.factor(fit_df$Instructor_ID)
+fit_df$Cid <- as.factor(fit_df$Cid)
+# scale
+fit_df$prob.w <- scale(fit_df$prob.w)
+contrasts(fit_df$Cid) <- contr.helmert(8)/8
+# model
+fit = lmer(data=fit_df, med_diff_wiki ~ prob.w*Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+# order for plotting
+diff_ord = levels(fit_df$Cid)[order(c(rev(rev(fit@beta)[1:length(levels(fit_df$Cid))-1]), 0))]
+```
+
+## Bio abstracts data - feminine
+```{r}
+
+fit_df <- df %>%
+  filter(
+    Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    gender50 != "",
+    above_flag == 0,
+    prob.w > 0) 
+fit_df$Instructor_ID <- as.factor(fit_df$Instructor_ID)
+fit_df$Cid <- as.factor(fit_df$Cid)
+# scale
+fit_df$prob.w <- scale(fit_df$prob.w)
+contrasts(fit_df$Cid) <- contr.helmert(8)/8
+# model
+fit = lmer(data=fit_df, med_wom_bio ~ prob.w*Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+```
+## Bio abstracts data - maculine
+```{r}
+
+fit_df <- df %>%
+  filter(
+    Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    gender50 != "",
+    above_flag == 0,
+    prob.w > 0) 
+fit_df$Instructor_ID <- as.factor(fit_df$Instructor_ID)
+fit_df$Cid <- as.factor(fit_df$Cid)
+# scale
+fit_df$prob.w <- scale(fit_df$prob.w)
+contrasts(fit_df$Cid) <- contr.helmert(8)/8
+# model
+fit = lmer(data=fit_df, med_man_bio ~ prob.w*Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+```
+
+## Summary
+```{r}
+
+fit_df <- df %>%
+  filter(
+    Question == "Strengths/Summary",
+    Answer.Text_Detail != "",
+    gender50 != "",
+    above_flag == 0,
+    prob.w > 0) 
+fit_df$Instructor_ID <- as.factor(fit_df$Instructor_ID)
+fit_df$Cid <- as.factor(fit_df$Cid)
+# scale
+fit_df$prob.w <- scale(fit_df$prob.w)
+contrasts(fit_df$Cid) <- contr.helmert(8)/8
+# model
+fit = lmer(data=fit_df, med_diff_wiki ~ prob.w*Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+
+res <- resid(fit)
+{qqnorm(res)
+qqline(res)}
+
+```
+
+## With evauator perceived gender
+```{r}
+
+fit_df <- df %>%
+  filter(
+    Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    gender50 != "",
+    above_flag == 0,
+    prob.w > 0,
+    F_prob.w > 0) 
+fit_df$Instructor_ID <- as.factor(fit_df$Instructor_ID)
+fit_df$Cid <- as.factor(fit_df$Cid)
+# scale
+fit_df$prob.w <- scale(fit_df$prob.w)
+contrasts(fit_df$Cid) <- contr.helmert(8)/8
+# model
+fit = lmer(data=fit_df, med_wom_wiki ~ prob.w*Cid + F_prob.w + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+F_fem_ord = levels(fit_df$Cid)[order(c(fit@beta[3:(3+length(levels(fit_df$Cid))-1)], 0))]
+
+fit = lmer(data=fit_df, med_man_wiki ~ prob.w*Cid + F_prob.w + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+F_masc_ord = levels(fit_df$Cid)[order(c(fit@beta[3:(3+length(levels(fit_df$Cid))-1)], 0))]
+
+```
+
+
+# Gender Coded-Language Conclusion
+Here, we test whether gender-coded language differs based on the perceived gender of medical trainees. Using gender coded language in professional settings can reinforce stereotypes about each gender and damage the prospects of candidates who do not match the historically highly represented gender of a job. For example, a recommended who uses gender-coded language might describe a male candidate as "brilliant" and an equally well-performing female candidate as "hard-working". These differences matter in fields like science and medicine where brilliance is a valued trait.
+
+To test if more feminine medical trainees receive reviews with more gender-coded language, we need to chose some way of quantifying how "feminine" the person might be perceived as and how gender-coded the language is. We chose to define the perceived femininity of a trainee using an algorithm that guesses how likely it is that a given first name is to be associated with a woman, based on 800,000 unique first names across 177 countries. We quantify gender-coded language using an algorithm that determines the semantic difference between all words in a review, and a list of 20 words associated with "woman" ("woman", "female", "mother", etc.). A similar score is calculated for a list of 20 "man" words.
+
+We find that there is a statistically significant *increase in masculine language, with increasing femininity of the trainee's name* (shown in the thick red line below) for feedback on weaknesses, but not strengths. Additionally, we find that the use of gendered language (feminine or masculine) varies by department, but the strength of the association with name does not vary with department. The most gendered language (both feminine and masculine) was used in emergency medicine. We find that these effects are replicated using word embedding from biological abstracts, rather than Wikipedia. The biological abstracts model shows a significant increase in both feminine and masculine language with increasing femininity of the name. It is worth noting that the perceived gender of the students name and the department explain and extremely small amount of the variability in feminine-coded language. Therefore, the model suggests that even for two individuals with the same name, there could be quite a lot of variability in the gendered-language used. We find that the main effect between feminine names and gender-coded language is greatly reduced, and no longer statistically significant, when the the ~5% of data points with the most extreme values are removed. This suggests that targeting interventions to the worst offenders might be an effective way to remove gendered language from feedback. We find that the use of both feminine and masculine language significantly increase with trainee's name femininity when accounting for perceived gender of the evaluatees name. Additionally, that gendered language use increases for faculty with more feminine names.
+
+We interpret this analysis to indicate that individuals with highly feminine names are increasingly critiqued in relation to gendered their conformity or violation of gendered expectations. In this data, we cannot parse which violations are more included in the critiques. It could be the case these individuals are critiqued for behaving too feminine (with feminine coded language) and not masculine enough (with masculine coded language), or vice versa. Regardless of the directionality, individuals with highly masculine names do not seem to be critiqued in language associated with gendered expectations. Additionally, we find that evaluators with more feminine names have an increased use of gendered language in their evaluations.
+
+```{r, fig.height=5}
+# reorder for slopes
+plot_df <- df %>%
+  filter(Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    gender50 != "",
+    above_flag == 0,
+    prob.w > 0,
+    F_prob.w > 0)
+plot_df$Cid <- as.factor(plot_df$Cid)
+plot_df$Cid <- factor(plot_df$Cid, level=fem_ord)
+
+
+p1 <- ggplot(plot_df, aes(y=med_wom_wiki, x=prob.w, color=Cid)) + 
+  geom_smooth(alpha=0.0, method='lm', size=.5) + 
+  scale_color_brewer(palette='Set1', direction=-1) +
+   geom_smooth(data=plot_df, method='lm', size=2, aes(y=med_wom_wiki, x=prob.w), color="grey") +  theme_minimal() +
+  ylab("Feminine-Coded Language") + xlab("Femininity of Trainee's First Name")
+
+
+#plot_df$Cid <- factor(plot_df$Cid, level=masc_ord)
+p2 <- ggplot(plot_df, aes(y=med_man_wiki, x=prob.w, color=Cid)) + 
+  geom_smooth(alpha=0.0, method='lm', size=.5) + 
+  scale_color_brewer(palette='Set1', direction=-1) +
+  theme_minimal() + geom_smooth(data=plot_df, method='lm', size=2, aes(y=med_man_wiki, x=prob.w), color='black') + 
+  ylab("Masculine-Coded Language") + xlab("Femininity of Trainee's First Name")
+
+
+#plot_df$Cid <- factor(plot_df$Cid, level=F_fem_ord)
+p3 <- ggplot(plot_df, aes(y=med_diff_wiki, x=F_prob.w, color=Cid)) + 
+  geom_smooth(alpha=0.0, method='lm', size=.5) + 
+  scale_color_brewer(palette='Set1', direction=-1) +
+  theme_minimal()  + geom_smooth(data=plot_df, method='lm', size=2, aes(y=med_diff_wiki, x=F_prob.w), color='black') +
+  ylab("Feminine Coded Language") + xlab("Femininity of Faculty's First Name")
+
+#plot_df$Cid <- factor(plot_df$Cid, level=F_masc_ord)
+p4 <- ggplot(plot_df, aes(y=med_man_wiki, x=F_prob.w, color=Cid)) + 
+  geom_smooth(alpha=0.0, method='lm', size=.5) + 
+  scale_color_brewer(palette='Set1', direction=-1) +
+  theme_minimal() + geom_smooth(data=plot_df, method='lm', size=2, aes(y=med_man_wiki, x=F_prob.w), color='black') +
+  ylab("Masculine-Coded Language") + xlab("Femininity of Faculties's First Name")
+
+grid.arrange(
+  p1,
+  p2,
+  p3,
+  p4,
+  widths = c(1, 1),
+  layout_matrix = rbind(c(1, 2),
+                        c(3, 4))
+)
+g <- arrangeGrob(
+  p1,
+  p2,
+  p3,
+  p4,
+  widths = c(1, 1),
+  layout_matrix = rbind(c(1, 2),
+                        c(3, 4))
+)
+ggsave("../img/gender.pdf",g)
+```
+Examples for feminine trainee names and masculine language (95th percentile for femininity of name and masculine language)
+```{r}
+if (print_ex){
+  ex_df <- df %>%
+    filter(Question == "Areas for improvement/Additional comments",
+      Answer.Text_Detail != "",
+      gender50 != "",
+      above_flag == 0,
+      prob.w > 0)
+  
+  name_thr = quantile(ex_df$prob.w, .95)
+  rev_thr = quantile(ex_df$med_man_wiki, .95)
+  
+  ex_df <- ex_df %>%
+    filter(
+      prob.w > name_thr,
+      med_man_wiki > rev_thr
+      )
+  # save for review
+  write_csv(ex_df, '../data/top_femName_mascLang.csv')
+  
+  nEx <- 10
+  idx <- sample(1:nrow(ex_df), nEx, replace=F)
+  for (i in seq(1, nEx)){
+    print(i)
+    print(ex_df[idx[i],'Answer.Text_Detail'])
+  }
+}
+```
+
+Examples for feminine trainee names and selectively masculine language (95th percentile for femininity of name and selectively masculine language)
+```{r}
+if (print_ex){
+  ex_df <- df %>%
+    filter(Question == "Areas for improvement/Additional comments",
+      Answer.Text_Detail != "",
+      gender50 != "",
+      above_flag == 0,
+      prob.w > 0)
+  
+  name_thr = quantile(ex_df$F_prob.w, .95)
+  rev_thr = quantile(ex_df$med_diff_wiki, .95)
+  
+  ex_df <- ex_df %>%
+    filter(
+      prob.w > name_thr,
+      med_diff_wiki > rev_thr
+      )
+  
+  nEx <- 10
+  idx <- sample(1:nrow(ex_df), nEx, replace=F)
+  for (i in seq(1, nEx)){
+    print(i)
+    print(ex_df[idx[i],'Answer.Text_Detail'])
+  }
+}
+```
+
+# Estimating race/ethnicity {.tabset}
+
+For each faculty and student, we calculate an estimate of the perceived race/ethnicity of the individual based on their name. A likelihood of a name belong belonging to a non-hispanic asian-american, non-hispanic black, hispanic, or white individual is calculate based on Florida voter registration data
+
+## estimated race/ethnicity - student
+```{r}
+
+df %>%
+  group_by(StudentID) %>%
+  summarise(
+    Race = first(race),
+    Cid = first(Cid)
+    ) %>%
+  filter(!is.na(Race)) %>%
+  ggplot(aes(x=Cid,fill=Race)) + geom_bar() + theme_minimal() + scale_fill_manual(values=rev(brewer.pal(4,'Set3')))
+
+```
+
+## estimated race/ethnicity - faculty
+```{r}
+
+df %>%
+  group_by(StudentID) %>%
+  summarise(
+    Race = first(F_race),
+    Cid = first(Cid)
+    ) %>%
+  filter(!is.na(Race)) %>%
+  ggplot(aes(x=Cid,fill=Race)) + geom_bar() + theme_minimal() + scale_fill_manual(values=rev(brewer.pal(4,'Set3')))
+
+```
+
+## race/ethnicity probability - student
+```{r}
+
+
+ggplot(df) + 
+  geom_histogram(aes(x=asian_mean), fill='coral2', alpha=0.6) + 
+  geom_histogram(aes(x=hispanic_mean), fill='darkorchid2', alpha=0.6)  + 
+  geom_histogram(aes(x=nh_black_mean), fill='gold', alpha=0.6) + 
+  geom_histogram(aes(x=nh_white_mean), fill='aquamarine2', alpha=0.6) +
+  theme_minimal() 
+
+
+```
+
+## race/ethnicity probability - faculty
+```{r}
+
+
+ggplot(df) + 
+  geom_histogram(aes(x=F_asian_mean), fill='coral2', alpha=0.6) + 
+  geom_histogram(aes(x=F_hispanic_mean), fill='darkorchid2', alpha=0.6)  + 
+  geom_histogram(aes(x=F_nh_black_mean), fill='gold', alpha=0.6) + 
+  geom_histogram(aes(x=F_nh_white_mean), fill='aquamarine2', alpha=0.6) +
+  theme_minimal() 
+
+
+```
+
+# Sentiment Analysis {.tabset}
+
+## questions - sum
+```{r}
+
+df %>%
+  filter(
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F) %>%
+  ggplot(aes(y=scale_sent, x=Question, fill=Question)) + 
+  geom_violin(alpha=0.8) + 
+  scale_fill_manual(values=colors) +
+  theme_minimal() 
+
+stat = t.test(filter(df, Question == 'Areas for improvement/Additional comments')$scale_sent, filter(df, Question == 'Strengths/Summary')$scale_sent)
+stat
+```
+## questions - mean
+```{r}
+
+df %>%
+  filter(
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F) %>%
+  ggplot(aes(y=mean_sent, x=Question, fill=Question)) + 
+  geom_violin(alpha=0.8) + 
+  scale_fill_manual(values=colors) +
+  theme_minimal() 
+
+stat = t.test(filter(df, Question == 'Areas for improvement/Additional comments')$sum_sent, filter(df, Question == 'Strengths/Summary')$sum_sent)
+stat
+```
+
+## URM
+```{r}
+
+df %>%
+  filter(
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F) %>%
+  ggplot(aes(x=scale_sent, fill=S_URM)) + 
+  geom_histogram(alpha=0.8) + 
+  scale_fill_manual(values=rev(c(colors, 'grey'))) +
+  theme_minimal() 
+
+```
+
+## Race
+```{r}
+
+df %>%
+  filter(
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F) %>%
+  ggplot(aes(x=scale_sent, fill=race)) + 
+  geom_histogram(alpha=0.8) + 
+  scale_fill_manual(values=brewer.pal(4,'Set3')) +
+  theme_minimal() 
+
+```
+
+## pos neg
+```{r}
+
+df %>%
+  filter(Answer.Text_Detail != "") %>%
+  ggplot(aes(x=scale_sent,fill=sent)) + 
+  geom_histogram(alpha=0.8) + 
+  scale_fill_manual(values=colors) +
+  theme_minimal() 
+
+```
+
+## length
+```{r}
+
+df %>%
+  filter(Answer.Text_Detail != "") %>%
+  ggplot(aes(x=text_len,fill=race)) + 
+  geom_histogram(alpha=0.8) + 
+  scale_fill_manual(values=brewer.pal(4,'Set3')) +
+  theme_minimal() 
+
+```
+
+# Sentiment Linear Models {.tabset}
+
+## Improvement - race
+```{r}
+
+fit_df <- df %>%
+  filter(
+    Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F) 
+fit_df$Instructor_ID <- as.factor(fit_df$Instructor_ID)
+fit_df$Cid <- as.factor(fit_df$Cid)
+fit_df$race <- as.factor(fit_df$race)
+# scale
+contrasts(fit_df$race) <- contr.helmert(4)/4
+contrasts(fit_df$Cid) <- contr.helmert(8)/8
+# model
+fit = lmer(data=fit_df, scale_sent ~ race + Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+# save for plotting
+plot_race_sent = fit
+
+res <- resid(fit)
+{qqnorm(res)
+qqline(res)}
+# check outliers
+cooksd <- cooks.distance(fit)
+plot(cooksd, pch="*", cex=2, main="Influential Obs by Cooks distance")
+abline(h = 4*mean(cooksd, na.rm=T), col="red")  # add cutoff line
+text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4*mean(cooksd, na.rm=T),names(cooksd),""), col="red")  # add labels
+# redo model without outliers
+fit_df_no <- fit_df[cooksd>4*mean(cooksd, na.rm=T),]
+fit_no <- lmer(data=fit_df_no, scale_sent ~ race + Cid + (1|Instructor_ID))
+anova(fit_no)
+```
+## Length of Improvement - race
+```{r}
+
+fit_df <- df %>%
+  filter(
+    Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F) 
+fit_df$Instructor_ID <- as.factor(fit_df$Instructor_ID)
+fit_df$Cid <- as.factor(fit_df$Cid)
+fit_df$race <- as.factor(fit_df$race)
+# scale
+contrasts(fit_df$race) <- contr.helmert(4)/4
+contrasts(fit_df$Cid) <- contr.helmert(8)/8
+fit_df$text_len <- scale(log10(fit_df$text_len))
+# model
+fit = lmer(data=fit_df, text_len ~ race + Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+# save for plotting
+plot_race_len = fit
+
+res <- resid(fit)
+{qqnorm(res)
+qqline(res)}
+# check outliers
+cooksd <- cooks.distance(fit)
+plot(cooksd, pch="*", cex=2, main="Influential Obs by Cooks distance")
+abline(h = 4*mean(cooksd, na.rm=T), col="red")  # add cutoff line
+text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4*mean(cooksd, na.rm=T),names(cooksd),""), col="red")  # add labels
+# redo model without outliers
+fit_df_no <- fit_df[cooksd>4*mean(cooksd, na.rm=T),]
+fit_no <- lmer(data=fit_df_no, text_len ~ race + Cid + (1|Instructor_ID))
+anova(fit_no)
+```
+
+## Summary - race
+```{r}
+
+fit_df <- df %>%
+  filter(
+    Question == "Strengths/Summary",
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F) 
+fit_df$Instructor_ID <- as.factor(fit_df$Instructor_ID)
+fit_df$Cid <- as.factor(fit_df$Cid)
+fit_df$race <- as.factor(fit_df$race)
+# scale
+contrasts(fit_df$race) <- contr.helmert(4)/4
+contrasts(fit_df$Cid) <- contr.helmert(8)/8
+fit_df$text_len <- scale(log10(fit_df$text_len))
+# model
+fit = lmer(data=fit_df, scale_sent ~ race + Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+
+fit = lmer(data=fit_df, text_len ~ race + Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+
+res <- resid(fit)
+{qqnorm(res)
+qqline(res)}
+
+```
+
+## Faculty race
+```{r}
+
+fit_df <- df %>%
+  filter(
+    Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F) 
+fit_df$Instructor_ID <- as.factor(fit_df$Instructor_ID)
+fit_df$Cid <- as.factor(fit_df$Cid)
+fit_df$race <- as.factor(fit_df$race)
+# scale
+contrasts(fit_df$race) <- contr.helmert(4)/4
+contrasts(fit_df$Cid) <- contr.helmert(8)/8
+fit_df$text_len <- scale(log10(fit_df$text_len))
+# model
+fit = lmer(data=fit_df, scale_sent ~ race + F_race + Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+
+# model
+fit = lmer(data=fit_df, text_len ~ race + F_race + Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+
+
+res <- resid(fit)
+{qqnorm(res)
+qqline(res)}
+```
+
+
+## asian
+```{r}
+
+fit_df <- df %>%
+  filter(
+    Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F) 
+fit_df$Instructor_ID <- as.factor(fit_df$Instructor_ID)
+fit_df$StudentID <- as.factor(fit_df$StudentID)
+fit_df$Cid <- as.factor(fit_df$Cid)
+fit_df$race <- as.factor(fit_df$race)
+# scale
+contrasts(fit_df$race) <- contr.helmert(4)/4
+contrasts(fit_df$Cid) <- contr.helmert(8)/8
+fit_df$asian_mean <- scale(fit_df$asian_mean)
+fit_df$text_len <- scale(log10(fit_df$text_len))
+
+# model
+fit = lmer(data=fit_df, mean_sent ~ asian_mean*Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+asian_sent_ord = levels(fit_df$Cid)[order(c(fit@beta[3:(3+length(levels(fit_df$Cid))-1)], 0))]
+
+
+fit = lmer(data=fit_df, text_len ~ asian_mean*Cid + (1|Instructor_ID))
+asian_len_ord = levels(fit_df$Cid)[order(c(fit@beta[3:(3+length(levels(fit_df$Cid))-1)], 0))]
+anova(fit)
+summary(fit)
+
+res <- resid(fit)
+{qqnorm(res)
+qqline(res)}
+
+```
+
+## hispanic
+```{r}
+
+fit_df <- df %>%
+  filter(
+    Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F) 
+fit_df$Instructor_ID <- as.factor(fit_df$Instructor_ID)
+fit_df$StudentID <- as.factor(fit_df$StudentID)
+fit_df$Cid <- as.factor(fit_df$Cid)
+fit_df$race <- as.factor(fit_df$race)
+# scale
+contrasts(fit_df$race) <- contr.helmert(4)/4
+contrasts(fit_df$Cid) <- contr.helmert(8)/8
+fit_df$hispanic_mean <- scale(fit_df$hispanic_mean)
+fit_df$text_len <- scale(log10(fit_df$text_len))
+
+# model
+fit = lmer(data=fit_df, scale_sent ~ hispanic_mean*Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+
+fit = lmer(data=fit_df, text_len ~ hispanic_mean*Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+
+res <- resid(fit)
+{qqnorm(res)
+qqline(res)}
+
+```
+
+## black
+```{r}
+
+fit_df <- df %>%
+  filter(
+    Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F) 
+fit_df$Instructor_ID <- as.factor(fit_df$Instructor_ID)
+fit_df$Cid <- as.factor(fit_df$Cid)
+fit_df$race <- as.factor(fit_df$race)
+# scale
+contrasts(fit_df$race) <- contr.helmert(4)/4
+contrasts(fit_df$Cid) <- contr.helmert(8)/8
+fit_df$nh_black_mean <- scale(fit_df$nh_black_mean)
+fit_df$text_len <- scale(log10(fit_df$text_len))
+
+# model
+fit = lmer(data=fit_df, scale_sent ~ nh_black_mean*Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+
+fit = lmer(data=fit_df, text_len ~ nh_black_mean*Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+
+res <- resid(fit)
+{qqnorm(res)
+qqline(res)}
+
+```
+
+## white
+```{r}
+
+fit_df <- df %>%
+  filter(
+    Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F) 
+fit_df$Instructor_ID <- as.factor(fit_df$Instructor_ID)
+fit_df$Cid <- as.factor(fit_df$Cid)
+fit_df$race <- as.factor(fit_df$race)
+# scale
+contrasts(fit_df$race) <- contr.helmert(4)/4
+contrasts(fit_df$Cid) <- contr.helmert(8)/8
+fit_df$nh_white_mean <- scale(fit_df$nh_white_mean)
+fit_df$text_len <- scale(log10(fit_df$text_len))
+
+# model
+fit = lmer(data=fit_df, mean_sent ~ nh_white_mean*Cid + (1|Instructor_ID))
+white_sent_ord = levels(fit_df$Cid)[order(c(fit@beta[3:(3+length(levels(fit_df$Cid))-1)], 0))]
+anova(fit)
+summary(fit)
+
+fit = lmer(data=fit_df, text_len ~ nh_white_mean*Cid + (1|Instructor_ID))
+white_len_ord = levels(fit_df$Cid)[order(c(fit@beta[3:(3+length(levels(fit_df$Cid))-1)], 0))]
+anova(fit)
+summary(fit)
+
+res <- resid(fit)
+{qqnorm(res)
+qqline(res)}
+
+```
+
+# Sentiment Conclusion
+
+Here, we seek to test if there is relationship between the positivity of a review, and the perceived race/ethnicity of the trainee. To quantify perceived race, we use a model trained to predict race/ethnicity from an individuals full name. The model was trained on voter registration data from the state of Florida. We define positive sentiment using AFINN rankings of individual words. These are crowdsourced rankings of common words as "positive" (1 - 5) "neutral" (0) or "negative (-1 - -5). This method was chosen because it captures a graded measure of positivity rather than assigning a binary label. The sentiment of a review is obtained by summing the AINN rankings for each word.
+
+We find a significant main effect for perceived race/ethnicity and the sentiment of the review for "Areas for Improvement" reviews. Hispanic names received the most positive reviews, followed by (nh) Asian, (nh) White, and (nh) Black. It is important to note that with this method, it is possible that positive sentiment comes from negated statements (i.e. She is not good), and therefore could reflect a negative review. Additionally, we find that the length of "Areas for Improvement" reviews differ by race. Perceived (nh) White individuals receive the longest reviews, followed by perceived (nh) Black, (nh) Asian, and Hispanic individuals. These effects remains when accounting for the faculty's perceived race/ethnicity as well. After removing the 5% of reviews with most extreme values, these effects are no longer significant, indicating that targeting the writers of the most extreme sentiments could help alleviate the effect. We find the positive sentiment also varies by department. 
+```{r, fig.height=2, fig.width=8}
+
+len_int = plot_race_len@beta[1]
+sent_int = plot_race_sent@beta[1]
+plot_df = data.frame('beta'=c(plot_race_len@beta[2:4] + len_int,len_int,plot_race_sent@beta[2:4] + sent_int,sent_int), 
+                     'measure'=c(rep('len', times=4),rep('sent', times=4)), 
+                     'race'=c(levels(as.factor(df$race)),levels(as.factor(df$race))),
+                     'sd'=c(diag(vcov(plot_race_len))[2:4],diag(vcov(plot_race_len))[1],
+                            diag(vcov(plot_race_sent))[2:4],diag(vcov(plot_race_sent))[1]))
+
+
+p <- ggplot(filter(plot_df,measure == 'len'), aes(y=beta, x=race, fill=race)) + 
+  geom_bar(stat='identity') + 
+  geom_errorbar(aes(ymin=beta-sd, ymax=beta+sd), colour = "black", stat = "identity", width = 0.4) +
+  scale_fill_brewer(palette='Set2') +
+  theme_minimal() + 
+  ylab("Length Beta") + xlab("Race/Ethnicity")
+
+p1 <- ggplot(filter(plot_df,measure == 'sent'), aes(y=beta, x=race, fill=race)) + 
+  geom_bar(stat='identity') + coord_cartesian(ylim=c(1,1.35)) +
+  geom_errorbar(aes(ymin=beta-sd, ymax=beta+sd), colour = "black", stat = "identity", width = 0.4) +
+  scale_fill_brewer(palette='Set2') +
+  theme_minimal() + 
+  ylab("Sentiment Beta") + xlab("Race/Ethnicity")
+
+grid.arrange(
+  p,
+  p1,
+  widths = c(1, 1),
+  layout_matrix = rbind(c(1,2))
+)
+g <- arrangeGrob(
+  p,
+  p1,
+  widths = c(1, 1),
+  layout_matrix = rbind(c(1,2))
+)
+ggsave("../img/race_cat.pdf",g)
+```
+
+We next sought to test associations between text sentiment and length and the strength of the perceived race/ethnicity of the trainee's name. We find no significant associations between the strength of the race/ethnicity association and text sentiment. However, we do find a significant positive association between the certainty that a name is (nh) Asian or (nh) White and the length of the review. Names perceived as more (nh) Asian tend to have longer reviews, and names perceived as more (nh) White tend to have shorter reviews. There are no significant relationships for the extent to which names appear Hispanic, or (nh) Black. We then asked whether differences in length for reviews of trainees (nh) Asian and (nh) White names were obscuring differences in sentiment. We therefore completed our analysis relating the strength of the association with (nh) Asian and (nh) White names to a length-normalized assessment of sentiment. We no significant relationship for the association with (nh) White, but find a significant negative relationship between the strength of the association to (nh) Asian names and normalized sentiment.
+
+Overall, we find that both the length and overall sentiment of "Areas for Improvement" reviews differ by race/ethnicity. Additionally, the perceived (nh) White-ness of a trainee's name is associated with longer reviews, and the (nh) Asian-ness of a name is associated with shorter reviews, with more negative sentiment per word. These findings cannot determine whether different perceived race/ethnicity tend to get worse reviews, only that they tend to differ.
+```{r, fig.height=6}
+# reorder for slopes
+plot_df <- df %>%
+  filter(Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F)
+plot_df$Cid <- as.factor(plot_df$Cid)
+
+
+#plot_df$Cid <- factor(plot_df$Cid, level=asian_len_ord)
+p1 <- ggplot(plot_df, aes(y=log10(text_len), x=asian_mean, color=Cid)) + 
+  geom_smooth(alpha=0.0, method='lm', size=.5) + 
+  scale_color_brewer(palette='Set1', direction=-1) +
+  theme_grey() + geom_smooth(data=plot_df, method='lm', size=2, aes(y=log10(text_len), x=asian_mean), color='black') +  theme_minimal() +
+  ylab("Length of Review") + xlab("Likelihood Name is Asian")
+
+
+#plot_df$Cid <- factor(plot_df$Cid, level=white_len_ord)
+p2 <- ggplot(plot_df, aes(y=log10(text_len), x=nh_white_mean, color=Cid)) + 
+  geom_smooth(alpha=0.0, method='lm', size=.5) + 
+  scale_color_brewer(palette='Set1', direction=-1) +
+  theme_minimal()  + geom_smooth(data=plot_df, method='lm', size=2, aes(y=log10(text_len), x=nh_white_mean), color='black') + 
+  ylab("Length of Review") + xlab("Likelihood Name is White")
+
+#plot_df$Cid <- factor(plot_df$Cid, level=asian_sent_ord)
+p3 <- ggplot(plot_df, aes(y=mean_sent, x=asian_mean, color=Cid)) + 
+  geom_smooth(alpha=0.0, method='lm', size=.5) + 
+  scale_color_brewer(palette='Set1', direction=-1) +
+  theme_grey() + geom_smooth(data=plot_df, method='lm', size=2, aes(y=mean_sent, x=asian_mean), color='black') +  theme_minimal() +
+  ylab("Normalized Sentiment of Review") + xlab("Likelihood Name is Asian")
+
+
+#plot_df$Cid <- factor(plot_df$Cid, level=white_sent_ord)
+p4 <- ggplot(plot_df, aes(y=mean_sent, x=nh_white_mean, color=Cid)) + 
+  geom_smooth(alpha=0.0, method='lm', size=.5) + 
+  scale_color_brewer(palette='Set1', direction=-1) +
+  theme_minimal()  + geom_smooth(data=plot_df, method='lm', size=2, aes(y=mean_sent, x=nh_white_mean), color="grey") + 
+  ylab("Normalized Sentiment of Review") + xlab("Likelihood Name is White")
+
+grid.arrange(
+  p1,
+  p2,
+  p3,
+  p4,
+  widths = c(1, 1),
+  layout_matrix = rbind(c(1,2),
+                        c(3, 4))
+)
+g <- arrangeGrob(
+  p1,
+  p2,
+  p3,
+  p4,
+  widths = c(1, 1),
+  layout_matrix = rbind(c(1,2),
+                        c(3, 4))
+)
+ggsave("../img/race_cont.pdf",g)
+```
+
+
+
+# Intersectional sentiment analysis {.tabset}
+
+## text length
+```{r}
+
+fit_df <- df %>%
+  filter(
+    Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F) 
+fit_df$Instructor_ID <- as.factor(fit_df$Instructor_ID)
+fit_df$Cid <- as.factor(fit_df$Cid)
+fit_df$race <- as.factor(fit_df$race)
+# scale
+contrasts(fit_df$race) <- contr.helmert(4)/4
+contrasts(fit_df$Cid) <- contr.helmert(8)/8
+fit_df$nh_white_mean <- scale(fit_df$nh_white_mean)
+fit_df$text_len <- scale(log10(fit_df$text_len))
+fit_df$prob.w <- scale(fit_df$prob.w)
+
+# model
+fit = lmer(data=fit_df, text_len ~ race*prob.w + Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+
+
+res <- resid(fit)
+{qqnorm(res)
+qqline(res)}
+
+```
+
+## text sentiment
+```{r}
+
+fit_df <- df %>%
+  filter(
+    Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F) 
+fit_df$Instructor_ID <- as.factor(fit_df$Instructor_ID)
+fit_df$Cid <- as.factor(fit_df$Cid)
+fit_df$race <- as.factor(fit_df$race)
+# scale
+contrasts(fit_df$race) <- contr.helmert(4)/4
+contrasts(fit_df$Cid) <- contr.helmert(8)/8
+fit_df$nh_white_mean <- scale(fit_df$nh_white_mean)
+fit_df$text_len <- scale(log10(fit_df$text_len))
+fit_df$prob.w <- scale(fit_df$prob.w)
+fit_df$scale_sent <- scale(fit_df$scale_sent)
+
+# model
+fit = lmer(data=fit_df, scale_sent ~ race*prob.w + Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+
+
+res <- resid(fit)
+{qqnorm(res)
+qqline(res)}
+
+```
+
+
+## normalized sentiment
+```{r}
+
+fit_df <- df %>%
+  filter(
+    Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F) 
+fit_df$Instructor_ID <- as.factor(fit_df$Instructor_ID)
+fit_df$Cid <- as.factor(fit_df$Cid)
+fit_df$race <- as.factor(fit_df$race)
+# scale
+contrasts(fit_df$race) <- contr.helmert(4)/4
+contrasts(fit_df$Cid) <- contr.helmert(8)/8
+fit_df$nh_white_mean <- scale(fit_df$nh_white_mean)
+fit_df$text_len <- scale(log10(fit_df$text_len))
+fit_df$prob.w <- scale(fit_df$prob.w)
+fit_df$scale_sent <- scale(fit_df$scale_sent)
+
+# model
+fit = lmer(data=fit_df, mean_sent ~ race*prob.w + Cid + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+
+
+res <- resid(fit)
+{qqnorm(res)
+qqline(res)}
+
+```
+
+Examples for (nh) Asian names (99th percentile for (nh) Asian name, 5th percentile for sentiment)
+```{r}
+if (print_ex){
+  ex_df <- df %>%
+    filter(Question == "Areas for improvement/Additional comments",
+      Answer.Text_Detail != "",
+      above_flag == F,
+      none_flag == F)
+  
+  name_thr = quantile(ex_df$asian_mean, .95)
+  rev_thr = quantile(ex_df$mean_sent, .05)
+  
+  ex_df <- ex_df %>%
+    filter(
+      asian_mean > name_thr,
+      mean_sent < rev_thr
+      )
+  # save for review
+  write_csv(ex_df, '../data/top_AsianName_negSent.csv')
+  
+  nEx <- 10
+  idx <- sample(1:nrow(ex_df), nEx, replace=F)
+  for (i in seq(1, nEx)){
+    print(i)
+    print(ex_df[idx[i],'Answer.Text_Detail'])
+  }
+}
+```
+
+Examples for (nh) White names (99th percentile for (nh) White name, 90th percentile for sentiment)
+```{r}
+if (print_ex){
+  ex_df <- df %>%
+    filter(Question == "Areas for improvement/Additional comments",
+      Answer.Text_Detail != "",
+      above_flag == F,
+      none_flag == F)
+  
+  name_thr = quantile(ex_df$nh_white_mean, .95)
+  rev_thr = quantile(ex_df$mean_sent, .95)
+  
+  ex_df <- ex_df %>%
+    filter(
+      nh_white_mean > name_thr,
+      mean_sent > rev_thr
+      )
+  # save for review
+  write_csv(ex_df, '../data/top_WhiteName_posSent.csv')
+  
+  nEx <- 10
+  idx <- sample(1:nrow(ex_df), nEx, replace=F)
+  for (i in seq(1, nEx)){
+    print(i)
+    print(ex_df[idx[i],'Answer.Text_Detail'])
+  }
+}
+```
+
+```{r}
+# save other data for review
+
+ex_df <- df %>%
+  filter(Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F)
+
+name_thr = quantile(ex_df$hispanic_mean, .95)
+rev_thr = quantile(ex_df$mean_sent, .95)
+
+ex_df_hisp <- ex_df %>%
+  filter(
+    hispanic_mean > name_thr,
+    mean_sent > rev_thr
+    )
+# save for review
+write_csv(ex_df_hisp, '../data/top_HispName_posSent.csv')
+
+name_thr = quantile(ex_df$nh_black_mean, .95)
+rev_thr = quantile(ex_df$mean_sent, .05)
+
+ex_df_black <- ex_df %>%
+  filter(
+    nh_black_mean > name_thr,
+    mean_sent < rev_thr
+    )
+# save for review
+write_csv(ex_df_black, '../data/top_BlackName_negSent.csv')
+
+```
+
+
+# Intersectionality Conclusion
+
+It has been well documented that individuals with multiple marginalized identities (here, women of color) often face barriers different, or greater than the individuals with only one of the same marginalized identities. To test for similar effects in our dataset, we repeated the above analyses with the perceived femininty of a name as an interaction term with race/ethnicity. This would tell us if individuals with perceived intersectional identities (perceived as women of color) have significantly different "Areas for Improvement" reviews than individuals perceived as women, and individuals perceived as racial/ethnic minorities.
+
+We investigate three features of "Areas for Improvement" reviews: the length; the total sentiment; and the normalized sentiment. We find that individuals with more feminine names tend to receive shorter reviews, and that individuals with different race/ethnicities have different length reviews. However there is not significant interaction between perceived race/ethnicity and gender on length. We find that the total sentiment of reviews differs only by perceived race/ethnicity, not gender, and that there is no interaction between perceived race/ethnicity and gender on total sentiment. Lastly, we find that the normalized sentiment of reviews varies by both perceived race/ethnicity and gender (more feminine names have more positive sentiment per word), however there is no significant interaction between the two.
+
+```{r, fig.height=2, fig.width=10}
+# reorder for slopes
+plot_df <- df %>%
+  filter(Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F,
+    prob.w > 0)
+plot_df$Cid <- as.factor(plot_df$Cid)
+
+
+p1 <- ggplot(plot_df, aes(y=log10(text_len), x=prob.w, color=race)) + 
+  geom_smooth(alpha=0.0, method='lm', size=1) + 
+  scale_color_brewer(palette='Set2') +
+   geom_smooth(data=plot_df, method='lm', size=2, aes(y=log10(text_len), x=prob.w), color=colors[1]) +  theme_minimal() +
+  ylab("Length of Review") + xlab("Feminiity of Trainee's Name")
+
+
+p2 <- ggplot(plot_df, aes(y=sum_sent, x=prob.w, color=race)) + 
+  geom_smooth(alpha=0.0, method='lm', size=1) + 
+  scale_color_brewer(palette='Set2') +
+   geom_smooth(data=plot_df, method='lm', size=2, aes(y=sum_sent, x=prob.w), color=colors[1]) +  theme_minimal() +
+  ylab("Total Sentiment") + xlab("Feminiity of Trainee's Name")
+
+p3 <- ggplot(plot_df, aes(y=mean_sent, x=prob.w, color=race)) + 
+  geom_smooth(alpha=0.0, method='lm', size=1) + 
+  scale_color_brewer(palette='Set2') +
+   geom_smooth(data=plot_df, method='lm', size=2, aes(y=mean_sent, x=prob.w), color=colors[1]) +  theme_minimal() +
+  ylab("Normalized Sentiment") + xlab("Feminiity of Trainee's Name")
+
+
+grid.arrange(
+  p1,
+  p2,
+  p3,
+  widths = c(1,1,1),
+  layout_matrix = rbind(c(1,2,3))
+)
+g <- arrangeGrob(
+  p1,
+  p2,
+  p3,
+  widths = c(1,1,1),
+  layout_matrix = rbind(c(1,2,3))
+)
+ggsave("../img/intersetionality.pdf",g)
+```
+
+
+# Future Directions
+
+In our perceived gender analysis, we notice there is some context dependence. Meaning that the model used to train word embedding matters when investigating whether more feminine language is used in reviews. It might be useful to recreate some previously reported language bias findings in each model to understand the discrepancy. Additionally, our current sentiment analysis still leaves some open questions regarding who receives "better" reviews. Using a contextualized sentiment analysis might clarify our interpretation.
