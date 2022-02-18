@@ -506,7 +506,7 @@ stat
 ```{r}
 
 ggplot(df, aes(x=med_diff_bio,y=med_diff_wiki)) + 
-  geom_point() + geom_smooth(method='lm') +
+  geom_hex(bins=70) + scale_fill_continuous(type = "viridis") +
   theme_minimal() 
 
 stat <- cor.test(df$med_diff_bio, df$med_diff_wiki)
@@ -612,9 +612,22 @@ anova(fit)
 summary(fit)
 # order for plotting
 diff_ord = levels(fit_df$Cid)[order(c(rev(rev(fit@beta)[1:length(levels(fit_df$Cid))-1]), 0))]
+# check normality
+res <- resid(fit)
+{qqnorm(res)
+qqline(res)}
+# check outliers
+cooksd <- cooks.distance(fit)
+plot(cooksd, pch="*", cex=2, main="Influential Obs by Cooks distance")
+abline(h = 4*mean(cooksd, na.rm=T), col="red")  # add cutoff line
+text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4*mean(cooksd, na.rm=T),names(cooksd),""), col="red")  # add labels
+# redo model without outliers
+fit_df_no <- fit_df[cooksd>4*mean(cooksd, na.rm=T),]
+fit_no <- lmer(data=fit_df_no, med_man_wiki ~ prob.w*Cid + (1|Instructor_ID))
+anova(fit_no)
 ```
 
-## Bio abstracts data - feminine
+## Bio abstracts data - diff
 ```{r}
 
 fit_df <- df %>%
@@ -630,7 +643,7 @@ fit_df$Cid <- as.factor(fit_df$Cid)
 fit_df$prob.w <- scale(fit_df$prob.w)
 contrasts(fit_df$Cid) <- contr.helmert(8)/8
 # model
-fit = lmer(data=fit_df, med_wom_bio ~ prob.w*Cid + (1|Instructor_ID))
+fit = lmer(data=fit_df, med_diff_bio ~ prob.w*Cid + (1|Instructor_ID))
 anova(fit)
 summary(fit)
 ```
@@ -708,6 +721,11 @@ anova(fit)
 summary(fit)
 F_masc_ord = levels(fit_df$Cid)[order(c(fit@beta[3:(3+length(levels(fit_df$Cid))-1)], 0))]
 
+fit = lmer(data=fit_df, med_diff_wiki ~ prob.w*Cid + F_prob.w + (1|Instructor_ID))
+anova(fit)
+summary(fit)
+F_diff_ord = levels(fit_df$Cid)[order(c(fit@beta[3:(3+length(levels(fit_df$Cid))-1)], 0))]
+
 ```
 
 
@@ -730,57 +748,16 @@ plot_df <- df %>%
     prob.w > 0,
     F_prob.w > 0)
 plot_df$Cid <- as.factor(plot_df$Cid)
-plot_df$Cid <- factor(plot_df$Cid, level=fem_ord)
+#plot_df$Cid <- factor(plot_df$Cid, level=fem_ord)
 
 
-p1 <- ggplot(plot_df, aes(y=med_wom_wiki, x=prob.w, color=Cid)) + 
+p1 <- ggplot(plot_df, aes(x=med_diff_wiki, y=prob.w, color=Cid)) + 
   geom_smooth(alpha=0.0, method='lm', size=.5) + 
   scale_color_brewer(palette='Set1', direction=-1) +
-   geom_smooth(data=plot_df, method='lm', size=2, aes(y=med_wom_wiki, x=prob.w), color="grey") +  theme_minimal() +
-  ylab("Feminine-Coded Language") + xlab("Femininity of Trainee's First Name")
-
-
-#plot_df$Cid <- factor(plot_df$Cid, level=masc_ord)
-p2 <- ggplot(plot_df, aes(y=med_man_wiki, x=prob.w, color=Cid)) + 
-  geom_smooth(alpha=0.0, method='lm', size=.5) + 
-  scale_color_brewer(palette='Set1', direction=-1) +
-  theme_minimal() + geom_smooth(data=plot_df, method='lm', size=2, aes(y=med_man_wiki, x=prob.w), color='black') + 
-  ylab("Masculine-Coded Language") + xlab("Femininity of Trainee's First Name")
-
-
-#plot_df$Cid <- factor(plot_df$Cid, level=F_fem_ord)
-p3 <- ggplot(plot_df, aes(y=med_diff_wiki, x=F_prob.w, color=Cid)) + 
-  geom_smooth(alpha=0.0, method='lm', size=.5) + 
-  scale_color_brewer(palette='Set1', direction=-1) +
-  theme_minimal()  + geom_smooth(data=plot_df, method='lm', size=2, aes(y=med_diff_wiki, x=F_prob.w), color='black') +
-  ylab("Feminine Coded Language") + xlab("Femininity of Faculty's First Name")
-
-#plot_df$Cid <- factor(plot_df$Cid, level=F_masc_ord)
-p4 <- ggplot(plot_df, aes(y=med_man_wiki, x=F_prob.w, color=Cid)) + 
-  geom_smooth(alpha=0.0, method='lm', size=.5) + 
-  scale_color_brewer(palette='Set1', direction=-1) +
-  theme_minimal() + geom_smooth(data=plot_df, method='lm', size=2, aes(y=med_man_wiki, x=F_prob.w), color='black') +
-  ylab("Masculine-Coded Language") + xlab("Femininity of Faculties's First Name")
-
-grid.arrange(
-  p1,
-  p2,
-  p3,
-  p4,
-  widths = c(1, 1),
-  layout_matrix = rbind(c(1, 2),
-                        c(3, 4))
-)
-g <- arrangeGrob(
-  p1,
-  p2,
-  p3,
-  p4,
-  widths = c(1, 1),
-  layout_matrix = rbind(c(1, 2),
-                        c(3, 4))
-)
-ggsave("../img/gender.pdf",g)
+   geom_smooth(data=plot_df, method='lm', size=2, aes(x=med_diff_wiki, y=prob.w), color="black") +  theme_minimal() +
+  xlab("Feminine - Masculine Coded Language") + ylab("Femininity of Trainee's First Name")
+p1
+ggsave("../img/gender.pdf",p1)
 ```
 Examples for feminine trainee names and masculine language (95th percentile for femininity of name and masculine language)
 ```{r}
@@ -1325,34 +1302,34 @@ plot_df$Cid <- as.factor(plot_df$Cid)
 
 
 #plot_df$Cid <- factor(plot_df$Cid, level=asian_len_ord)
-p1 <- ggplot(plot_df, aes(y=log10(text_len), x=asian_mean, color=Cid)) + 
+p1 <- ggplot(plot_df, aes(x=log10(text_len), y=asian_mean, color=Cid)) + 
   geom_smooth(alpha=0.0, method='lm', size=.5) + 
   scale_color_brewer(palette='Set1', direction=-1) +
-  theme_grey() + geom_smooth(data=plot_df, method='lm', size=2, aes(y=log10(text_len), x=asian_mean), color='black') +  theme_minimal() +
-  ylab("Length of Review") + xlab("Likelihood Name is Asian")
+  theme_grey() + geom_smooth(data=plot_df, method='lm', size=2, aes(x=log10(text_len), y=asian_mean), color='black') +  theme_minimal() +
+  xlab("Length of Review") + ylab("Likelihood Name is Asian")
 
 
 #plot_df$Cid <- factor(plot_df$Cid, level=white_len_ord)
-p2 <- ggplot(plot_df, aes(y=log10(text_len), x=nh_white_mean, color=Cid)) + 
+p2 <- ggplot(plot_df, aes(x=log10(text_len), y=nh_white_mean, color=Cid)) + 
   geom_smooth(alpha=0.0, method='lm', size=.5) + 
   scale_color_brewer(palette='Set1', direction=-1) +
-  theme_minimal()  + geom_smooth(data=plot_df, method='lm', size=2, aes(y=log10(text_len), x=nh_white_mean), color='black') + 
-  ylab("Length of Review") + xlab("Likelihood Name is White")
+  theme_minimal()  + geom_smooth(data=plot_df, method='lm', size=2, aes(x=log10(text_len), y=nh_white_mean), color='black') + 
+  xlab("Length of Review") + ylab("Likelihood Name is White")
 
 #plot_df$Cid <- factor(plot_df$Cid, level=asian_sent_ord)
-p3 <- ggplot(plot_df, aes(y=mean_sent, x=asian_mean, color=Cid)) + 
+p3 <- ggplot(plot_df, aes(x=mean_sent, y=asian_mean, color=Cid)) + 
   geom_smooth(alpha=0.0, method='lm', size=.5) + 
   scale_color_brewer(palette='Set1', direction=-1) +
-  theme_grey() + geom_smooth(data=plot_df, method='lm', size=2, aes(y=mean_sent, x=asian_mean), color='black') +  theme_minimal() +
-  ylab("Normalized Sentiment of Review") + xlab("Likelihood Name is Asian")
+  theme_grey() + geom_smooth(data=plot_df, method='lm', size=2, aes(x=mean_sent, y=asian_mean), color='black') +  theme_minimal() +
+  xlab("Normalized Sentiment of Review") + ylab("Likelihood Name is Asian")
 
 
 #plot_df$Cid <- factor(plot_df$Cid, level=white_sent_ord)
-p4 <- ggplot(plot_df, aes(y=mean_sent, x=nh_white_mean, color=Cid)) + 
+p4 <- ggplot(plot_df, aes(x=mean_sent, y=nh_white_mean, color=Cid)) + 
   geom_smooth(alpha=0.0, method='lm', size=.5) + 
   scale_color_brewer(palette='Set1', direction=-1) +
-  theme_minimal()  + geom_smooth(data=plot_df, method='lm', size=2, aes(y=mean_sent, x=nh_white_mean), color="grey") + 
-  ylab("Normalized Sentiment of Review") + xlab("Likelihood Name is White")
+  theme_minimal()  + geom_smooth(data=plot_df, method='lm', size=2, aes(x=mean_sent, y=nh_white_mean), color="grey") + 
+  xlab("Normalized Sentiment of Review") + ylab("Likelihood Name is White")
 
 grid.arrange(
   p1,
@@ -1584,24 +1561,24 @@ plot_df <- df %>%
 plot_df$Cid <- as.factor(plot_df$Cid)
 
 
-p1 <- ggplot(plot_df, aes(y=log10(text_len), x=prob.w, color=race)) + 
+p1 <- ggplot(plot_df, aes(x=log10(text_len), y=prob.w, color=race)) + 
   geom_smooth(alpha=0.0, method='lm', size=1) + 
   scale_color_brewer(palette='Set2') +
-   geom_smooth(data=plot_df, method='lm', size=2, aes(y=log10(text_len), x=prob.w), color=colors[1]) +  theme_minimal() +
-  ylab("Length of Review") + xlab("Feminiity of Trainee's Name")
+   geom_smooth(data=plot_df, method='lm', size=2, aes(x=log10(text_len), y=prob.w), color='black') +  theme_minimal() +
+  xlab("Length of Review") + ylab("Feminiity of Trainee's Name")
 
 
-p2 <- ggplot(plot_df, aes(y=sum_sent, x=prob.w, color=race)) + 
+p2 <- ggplot(plot_df, aes(x=sum_sent, y=prob.w, color=race)) + 
   geom_smooth(alpha=0.0, method='lm', size=1) + 
   scale_color_brewer(palette='Set2') +
-   geom_smooth(data=plot_df, method='lm', size=2, aes(y=sum_sent, x=prob.w), color=colors[1]) +  theme_minimal() +
-  ylab("Total Sentiment") + xlab("Feminiity of Trainee's Name")
+   geom_smooth(data=plot_df, method='lm', size=2, aes(x=sum_sent, y=prob.w), color='black') +  theme_minimal() +
+  xlab("Total Sentiment") + ylab("Feminiity of Trainee's Name")
 
-p3 <- ggplot(plot_df, aes(y=mean_sent, x=prob.w, color=race)) + 
+p3 <- ggplot(plot_df, aes(x=mean_sent, y=prob.w, color=race)) + 
   geom_smooth(alpha=0.0, method='lm', size=1) + 
   scale_color_brewer(palette='Set2') +
-   geom_smooth(data=plot_df, method='lm', size=2, aes(y=mean_sent, x=prob.w), color=colors[1]) +  theme_minimal() +
-  ylab("Normalized Sentiment") + xlab("Feminiity of Trainee's Name")
+   geom_smooth(data=plot_df, method='lm', size=2, aes(x=mean_sent, y=prob.w), color='black') +  theme_minimal() +
+  xlab("Normalized Sentiment") + ylab("Feminiity of Trainee's Name")
 
 
 grid.arrange(
