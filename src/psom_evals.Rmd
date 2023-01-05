@@ -817,6 +817,29 @@ if (print_ex){
 }
 ```
 
+Saving out most biased reviews
+```{r}
+ex_df <- df %>%
+    filter(Question == "Areas for improvement/Additional comments",
+      Answer.Text_Detail != "",
+      gender50 != "",
+      above_flag == 0,
+      prob.w > 0)
+
+high_thr = quantile(ex_df$med_diff_wiki, .95)
+low_thr = quantile(ex_df$med_diff_wiki, .05)
+
+high_ex <- ex_df %>%
+    filter(
+      med_man_wiki > high_thr
+    )
+write.csv(high_ex, './gendered_95.csv')
+low_ex <- ex_df %>%
+    filter(
+      med_man_wiki < low_thr
+      )
+write.csv(low_ex, './gendered_05.csv')
+```
 # Estimating race/ethnicity {.tabset}
 
 For each faculty and student, we calculate an estimate of the perceived race/ethnicity of the individual based on their name. A likelihood of a name belong belonging to a non-hispanic asian-american, non-hispanic black, hispanic, or white individual is calculate based on Florida voter registration data
@@ -1288,6 +1311,7 @@ g <- arrangeGrob(
 ggsave("../img/race_cat.pdf",g)
 ```
 
+
 We next sought to test associations between text sentiment and length and the strength of the perceived race/ethnicity of the trainee's name. We find no significant associations between the strength of the race/ethnicity association and text sentiment. However, we do find a significant positive association between the certainty that a name is (nh) Asian or (nh) White and the length of the review. Names perceived as more (nh) Asian tend to have longer reviews, and names perceived as more (nh) White tend to have shorter reviews. There are no significant relationships for the extent to which names appear Hispanic, or (nh) Black. We then asked whether differences in length for reviews of trainees (nh) Asian and (nh) White names were obscuring differences in sentiment. We therefore completed our analysis relating the strength of the association with (nh) Asian and (nh) White names to a length-normalized assessment of sentiment. We no significant relationship for the association with (nh) White, but find a significant negative relationship between the strength of the association to (nh) Asian names and normalized sentiment.
 
 Overall, we find that both the length and overall sentiment of "Areas for Improvement" reviews differ by race/ethnicity. Additionally, the perceived (nh) White-ness of a trainee's name is associated with longer reviews, and the (nh) Asian-ness of a name is associated with shorter reviews, with more negative sentiment per word. These findings cannot determine whether different perceived race/ethnicity tend to get worse reviews, only that they tend to differ.
@@ -1454,24 +1478,32 @@ qqline(res)}
 
 Examples for (nh) Asian names (99th percentile for (nh) Asian name, 5th percentile for sentiment)
 ```{r}
-if (print_ex){
-  ex_df <- df %>%
-    filter(Question == "Areas for improvement/Additional comments",
-      Answer.Text_Detail != "",
-      above_flag == F,
-      none_flag == F)
-  
-  name_thr = quantile(ex_df$asian_mean, .95)
-  rev_thr = quantile(ex_df$mean_sent, .05)
-  
-  ex_df <- ex_df %>%
-    filter(
-      asian_mean > name_thr,
-      mean_sent < rev_thr
-      )
-  # save for review
-  write_csv(ex_df, '../data/top_AsianName_negSent.csv')
-  
+ex_df <- df %>%
+  filter(Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F)
+
+name_thr = quantile(ex_df$asian_mean, .50)
+low_thr = quantile(ex_df$mean_sent, .05)
+high_thr = quantile(ex_df$mean_sent, .95)
+
+low_df_asian <- ex_df %>%
+  filter(
+    asian_mean > name_thr,
+    mean_sent < low_thr
+    )
+# save for review
+write_csv(low_df_asian, '../data/AsianName_05.csv')
+high_df_asian <- ex_df %>%
+  filter(
+    asian_mean > name_thr,
+    mean_sent > high_thr
+    )
+# save for review
+write_csv(high_df_asian, '../data/AsianName_95.csv')
+
+if (print_ex){  
   nEx <- 10
   idx <- sample(1:nrow(ex_df), nEx, replace=F)
   for (i in seq(1, nEx)){
@@ -1483,24 +1515,32 @@ if (print_ex){
 
 Examples for (nh) White names (99th percentile for (nh) White name, 90th percentile for sentiment)
 ```{r}
-if (print_ex){
-  ex_df <- df %>%
-    filter(Question == "Areas for improvement/Additional comments",
-      Answer.Text_Detail != "",
-      above_flag == F,
-      none_flag == F)
-  
-  name_thr = quantile(ex_df$nh_white_mean, .95)
-  rev_thr = quantile(ex_df$mean_sent, .95)
-  
-  ex_df <- ex_df %>%
-    filter(
-      nh_white_mean > name_thr,
-      mean_sent > rev_thr
-      )
-  # save for review
-  write_csv(ex_df, '../data/top_WhiteName_posSent.csv')
-  
+ex_df <- df %>%
+  filter(Question == "Areas for improvement/Additional comments",
+    Answer.Text_Detail != "",
+    above_flag == F,
+    none_flag == F)
+
+name_thr = quantile(ex_df$nh_white_mean, .50)
+high_thr = quantile(ex_df$mean_sent, .95)
+low_thr = quantile(ex_df$mean_sent, 0.05)
+high_df_white <- ex_df %>%
+  filter(
+    nh_white_mean > name_thr,
+    mean_sent > high_thr
+    )
+# save for review
+write_csv(high_df_white, '../data/WhiteName_95.csv')
+
+low_df_white <- ex_df %>%
+  filter(
+    nh_white_mean > name_thr,
+    mean_sent < low_thr
+    )
+# save for review
+write_csv(low_df_white, '../data/WhiteName_05.csv')
+
+if (print_ex){  
   nEx <- 10
   idx <- sample(1:nrow(ex_df), nEx, replace=F)
   for (i in seq(1, nEx)){
@@ -1519,28 +1559,50 @@ ex_df <- df %>%
     above_flag == F,
     none_flag == F)
 
-name_thr = quantile(ex_df$hispanic_mean, .95)
-rev_thr = quantile(ex_df$mean_sent, .95)
+name_thr = quantile(ex_df$hispanic_mean, .50)
+high_thr = quantile(ex_df$mean_sent, .95)
+low_thr = quantile(ex_df$mean_sent, .05)
 
 ex_df_hisp <- ex_df %>%
   filter(
     hispanic_mean > name_thr,
-    mean_sent > rev_thr
+    mean_sent > high_thr
     )
 # save for review
-write_csv(ex_df_hisp, '../data/top_HispName_posSent.csv')
+write_csv(ex_df_hisp, '../data/HispName_95.csv')
 
-name_thr = quantile(ex_df$nh_black_mean, .95)
-rev_thr = quantile(ex_df$mean_sent, .05)
+name_thr = quantile(ex_df$hispanic_mean, .50)
+high_thr = quantile(ex_df$mean_sent, .95)
+low_thr = quantile(ex_df$mean_sent, .05)
 
-ex_df_black <- ex_df %>%
+ex_df_hisp <- ex_df %>%
+  filter(
+    hispanic_mean > name_thr,
+    mean_sent < low_thr
+    )
+# save for review
+write_csv(ex_df_hisp, '../data/HispName_05.csv')
+
+
+name_thr = quantile(ex_df$nh_black_mean, .50)
+low_thr = quantile(ex_df$mean_sent, .05)
+high_thr = quantile(ex_df$mean_sent, .95)
+
+high_df_black <- ex_df %>%
   filter(
     nh_black_mean > name_thr,
-    mean_sent < rev_thr
+    mean_sent > high_thr
     )
 # save for review
-write_csv(ex_df_black, '../data/top_BlackName_negSent.csv')
+write_csv(high_df_black, '../data/BlackName_95.csv')
 
+low_df_black <- ex_df %>%
+  filter(
+    nh_black_mean > name_thr,
+    mean_sent < low_thr
+    )
+# save for review
+write_csv(low_df_black, '../data/BlackName_05.csv')
 ```
 
 
@@ -1568,10 +1630,10 @@ p1 <- ggplot(plot_df, aes(x=log10(text_len), y=prob.w, color=race)) +
   xlab("Length of Review") + ylab("Feminiity of Trainee's Name")
 
 
-p2 <- ggplot(plot_df, aes(x=sum_sent, y=prob.w, color=race)) + 
+p2 <- ggplot(plot_df, aes(x=scale_sent, y=prob.w, color=race)) + 
   geom_smooth(alpha=0.0, method='lm', size=1) + 
   scale_color_brewer(palette='Set2') +
-   geom_smooth(data=plot_df, method='lm', size=2, aes(x=sum_sent, y=prob.w), color='black') +  theme_minimal() +
+   geom_smooth(data=plot_df, method='lm', size=2, aes(x=scale_sent, y=prob.w), color='black') +  theme_minimal() +
   xlab("Total Sentiment") + ylab("Feminiity of Trainee's Name")
 
 p3 <- ggplot(plot_df, aes(x=mean_sent, y=prob.w, color=race)) + 
