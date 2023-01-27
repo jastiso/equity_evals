@@ -827,16 +827,16 @@ ex_df <- df %>%
       prob.w > 0)
 
 high_thr = quantile(ex_df$med_diff_wiki, .95)
-low_thr = quantile(ex_df$med_diff_wiki, .05)
+low_thr = quantile(ex_df$med_diff_wiki, .1)
 
 high_ex <- ex_df %>%
     filter(
-      med_man_wiki > high_thr
+      med_diff_wiki > high_thr
     )
 write.csv(high_ex, './gendered_95.csv')
 low_ex <- ex_df %>%
     filter(
-      med_man_wiki < low_thr
+      med_diff_wiki < low_thr
       )
 write.csv(low_ex, './gendered_05.csv')
 ```
