@@ -554,6 +554,16 @@ fit_no <- lmer(data=fit_df_no, med_wom_wiki ~ prob.w*Cid + (1|Instructor_ID))
 anova(fit_no)
 
 ```
+## descriptive stats
+```{r}
+
+dplyr::n_distinct(fit_df$Evaluatee)
+dplyr::n_distinct(fit_df$StudentName)
+dplyr::n_distinct(fit_df$FormID)
+write.csv2(fit_df, '../data/gender_cleaned.csv')
+```
+
+
 ## Areas for improvement - masculine language
 ```{r}
 
@@ -827,28 +837,16 @@ ex_df <- df %>%
       prob.w > 0)
 
 high_thr = quantile(ex_df$med_diff_wiki, .95)
-<<<<<<< HEAD
-low_thr = quantile(ex_df$med_diff_wiki, .1)
-
-high_ex <- ex_df %>%
-    filter(
-      med_diff_wiki > high_thr
-=======
 low_thr = quantile(ex_df$med_diff_wiki, .05)
 
 high_ex <- ex_df %>%
     filter(
       med_man_wiki > high_thr
->>>>>>> d6ffa524c81e0c59310ce578d01e9770ea3c761b
     )
 write.csv(high_ex, './gendered_95.csv')
 low_ex <- ex_df %>%
     filter(
-<<<<<<< HEAD
-      med_diff_wiki < low_thr
-=======
       med_man_wiki < low_thr
->>>>>>> d6ffa524c81e0c59310ce578d01e9770ea3c761b
       )
 write.csv(low_ex, './gendered_05.csv')
 ```
@@ -1104,6 +1102,11 @@ res <- resid(fit)
 {qqnorm(res)
 qqline(res)}
 
+```
+
+```{r}
+# save cleaned data
+write.csv2(fit_df, '../data/race_eth_cleaned.csv')
 ```
 
 ## Faculty race
